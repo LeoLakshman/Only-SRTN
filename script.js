@@ -46,7 +46,7 @@ let jobs = [];
             }
         }
 
-        function calculateSRTN() {
+       function calculateSRTN() {
     // Logic for SRTN scheduling
     const cpuCount = parseInt(document.getElementById("cpuCount").value);
     const timeQuantum = parseFloat(document.getElementById("timeQuantum").value);
