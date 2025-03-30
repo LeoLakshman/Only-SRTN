@@ -47,7 +47,7 @@ let jobs = [];
         }
 
        function calculateSRTN() {
-    // Logic for SRTN scheduling
+    // Logic for SRTN scheduling with N CPUs and time quantum for checks
     const cpuCount = parseInt(document.getElementById("cpuCount").value);
     const timeQuantum = parseFloat(document.getElementById("timeQuantum").value);
 
@@ -61,88 +61,101 @@ let jobs = [];
 
     let currentTime = 0.0;
     let completedJobs = 0;
-    let runningJobs = new Array(cpuCount).fill(null);
+    let runningJobs = new Array(cpuCount).fill(null); // Store the job running on each CPU (or null if idle)
     let jobHistory = [];
-    let jobQueueHistory = [];
+    let jobQueue = []; // Explicit job queue
 
     while (completedJobs < jobs.length) {
-        // Get all available jobs
-        let availableJobs = jobs.filter(job =>
-            job.arrivalTime <= currentTime &&
-            job.remainingTime > 0
-        ).sort((a, b) => a.remainingTime - b.remainingTime || a.arrivalTime - b.arrivalTime);
+        // Add arriving jobs to the queue
+        jobs.forEach(job => {
+            if (Math.abs(job.arrivalTime - currentTime) < 0.0001 && !jobQueue.includes(job) && job.remainingTime > 0) {
+                jobQueue.push(job);
+            }
+        });
 
-        // Store queue state
-        if (Math.abs(currentTime % timeQuantum) < 0.0001) {
-            jobQueueHistory.push({
-                time: currentTime,
-                jobs: availableJobs.filter(job =>
-                    !runningJobs.some(rj => rj && rj.id === job.id)
-                ).map(job => ({
-                    id: job.id,
-                    remainingTime: job.remainingTime
-                }))
-            });
-
-            // Assign CPUs
-            runningJobs = runningJobs.map(() => null);
-            for (let i = 0; i < Math.min(cpuCount, availableJobs.length); i++) {
-                let job = availableJobs[i];
-                if (job.startTime === -1) {
-                    job.startTime = currentTime;
+        // At the beginning of a time quantum or when a CPU is free, schedule the shortest remaining time job
+        if (Math.abs(currentTime % timeQuantum) < 0.0001 || runningJobs.includes(null)) {
+            let availableJobs = [...jobQueue];
+            for (let i = 0; i < cpuCount; i++) {
+                if (runningJobs[i] !== null) {
+                    availableJobs.push(jobs.find(j => j.id === runningJobs[i].jobId));
                 }
-                runningJobs[i] = { id: job.id, allocatedTime: 0.0 };
+            }
+            availableJobs = availableJobs.filter(job => job.remainingTime > 0);
+            availableJobs.sort((a, b) => a.remainingTime - b.remainingTime || a.arrivalTime - b.arrivalTime);
+
+            for (let i = 0; i < cpuCount; i++) {
+                if (runningJobs[i] === null && availableJobs.length > 0) {
+                    let shortestJob = availableJobs.shift();
+                    if (shortestJob.startTime === -1) {
+                        shortestJob.startTime = currentTime;
+                    }
+                    runningJobs[i] = { jobId: shortestJob.id, startTime: currentTime };
+                    jobQueue = jobQueue.filter(job => job.id !== shortestJob.id);
+                }
             }
         }
 
-        let timeIncrement = 0.1; // Increment time by a small fraction
-        let jobExecuted = false;
-
-        // Process each CPU
-        for (let i = 0; i < cpuCount; i++) {
-            if (runningJobs[i] !== null) {
-                let runningJob = runningJobs[i];
-                let job = jobs.find(j => j.id === runningJob.id);
-
-                const executionTime = Math.min(timeIncrement, job.remainingTime);
-
-                job.remainingTime -= executionTime;
-                runningJob.allocatedTime += executionTime;
-                jobExecuted = true;
-
-                jobHistory.push({
-                    jobId: job.id,
-                    cpuId: i,
-                    startTime: currentTime,
-                    endTime: currentTime + executionTime
-                });
-
-                if (job.remainingTime <= 0.0001) {
-                    job.endTime = currentTime + executionTime;
-                    job.turnaroundTime = job.endTime - job.arrivalTime;
-                    completedJobs++;
-                    runningJobs[i] = null;
-                }
-            } else {
-                jobHistory.push({
-                    jobId: 'idle',
-                    cpuId: i,
-                    startTime: currentTime,
-                    endTime: currentTime + timeIncrement
-                });
+        let timeIncrement = 0.1;
+        let nextQuantumBoundary = currentTime + timeQuantum;
+        let nextArrivalTime = Infinity;
+        jobs.forEach(job => {
+            if (job.arrivalTime > currentTime && job.arrivalTime < nextQuantumBoundary) {
+                nextArrivalTime = job.arrivalTime;
             }
+        });
+
+        let executeUntil = Math.min(nextQuantumBoundary, nextArrivalTime);
+        if (executeUntil === Infinity) {
+            executeUntil = nextQuantumBoundary;
         }
 
-        currentTime += timeIncrement;
-        if (!jobExecuted && completedJobs < jobs.length && availableJobs.length === 0) {
-            currentTime += timeIncrement; // Move time forward if no job is running and there are still pending jobs
+        let timeElapsed = 0;
+        while (currentTime < executeUntil && completedJobs < jobs.length) {
+            let currentIncrement = Math.min(timeIncrement, executeUntil - currentTime);
+            let jobsExecutedInThisIncrement = false;
+
+            for (let i = 0; i < cpuCount; i++) {
+                if (runningJobs[i] !== null) {
+                    let currentJob = jobs.find(j => j.id === runningJobs[i].jobId);
+                    currentJob.remainingTime -= currentIncrement;
+                    jobsExecutedInThisIncrement = true;
+
+                    jobHistory.push({
+                        jobId: currentJob.id,
+                        cpuId: i,
+                        startTime: currentTime,
+                        endTime: currentTime + currentIncrement
+                    });
+
+                    if (currentJob.remainingTime <= 0.0001) {
+                        currentJob.endTime = currentTime + currentIncrement;
+                        currentJob.turnaroundTime = currentJob.endTime - currentJob.arrivalTime;
+                        completedJobs++;
+                        runningJobs[i] = null;
+                    }
+                } else {
+                    jobHistory.push({
+                        jobId: 'idle',
+                        cpuId: i,
+                        startTime: currentTime,
+                        endTime: currentTime + currentIncrement
+                    });
+                }
+            }
+
+            currentTime += currentIncrement;
+            if (!jobsExecutedInThisIncrement && jobs.some(job => job.arrivalTime <= currentTime && job.remainingTime > 0)) {
+                currentTime = nextArrivalTime;
+            }
         }
     }
 
     updateJobTable();
     calculateAverageTurnaroundTime();
-    drawGanttChart(jobHistory, jobQueueHistory);
+    drawGanttChart(jobHistory, []); // Job queue history is not as crucial for this logic
 }
+
 
 function calculateRoundRobin() {
     // Logic for Round Robin scheduling
