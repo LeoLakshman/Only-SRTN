@@ -14,7 +14,7 @@ let jobs = [];
             };
             jobs.push(newJob);
             updateJobTable();
-        }
+        } 
 
         function removeLastJob() {
             if (jobs.length > 0) {
