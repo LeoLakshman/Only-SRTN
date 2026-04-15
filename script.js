@@ -11,7 +11,7 @@ let jobs = [];
                 endTime: 0.0,
                 turnaroundTime: 0.0,
                 lastExecutionTime: -1.0
-            };
+            }; 
             jobs.push(newJob);
             updateJobTable();
         } 
